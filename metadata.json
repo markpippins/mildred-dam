@@ -1,0 +1,6 @@
+{
+  "name": "Mildred DAM",
+  "description": "A sleek digital asset discovery, management, and analytics platform with advanced deduplication, workflow automation, and playback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
