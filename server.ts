@@ -1,6 +1,10 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
+import http from 'http';
+
+dotenv.config();
 
 // --- SEEDED IN-MEMORY DATABASE FOR MILDRED DAM REST API ---
 
@@ -437,11 +441,114 @@ function sendError(res: express.Response, status: number, error: string) {
   res.status(status).json({ error });
 }
 
+// Runtime mode from .env (VITE_MILDRED_MODE):
+//   mock = serve seeded in-memory data on port 3000 (default, no .env needed)
+//   live = proxy /api to the real mildred-service backend (:3140)
+const MILDRED_MODE = (process.env.VITE_MILDRED_MODE || 'mock').toLowerCase();
+const LIVE_TARGET = process.env.VITE_MILDRED_TARGET || 'http://localhost:3140';
+
+// Live-mode HTTP proxy: forwards non-static requests to the real backend.
+function createLiveProxy(targetUrl: string) {
+  const url = new URL(targetUrl);
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/@') || req.path.startsWith('/src') ||
+        req.path.startsWith('/node_modules') || req.path.startsWith('/favicon') ||
+        req.path === '/') {
+      return next();
+    }
+    console.log(`[mildred-ui -> live] ${req.method} ${req.path}`);
+    const rawBody = ['POST', 'PUT', 'PATCH'].includes(req.method) && req.body
+      ? JSON.stringify(req.body) : undefined;
+    const body = rawBody && rawBody !== '{}' ? rawBody : undefined;
+    const headers: Record<string, any> = { ...req.headers, host: `${url.hostname}:${url.port}` };
+    delete headers['content-length'];
+    if (body) headers['content-length'] = Buffer.byteLength(body).toString();
+    const proxyReq = http.request({
+      hostname: url.hostname, port: url.port,
+      path: req.originalUrl || req.url, method: req.method, headers,
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    proxyReq.on('error', (err) => {
+      console.error(`[mildred-ui -> live] proxy error: ${err.message}`);
+      if (!res.headersSent) res.status(502).json({ error: 'Mildred backend unreachable', detail: err.message });
+    });
+    proxyReq.setTimeout(30000, () => { proxyReq.destroy(); });
+    if (body) proxyReq.write(body);
+    proxyReq.end();
+  };
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Port by mode: mock → 3000 (Google AI Studio default), live → 4213
+  // (override with PORT env var). Live keeps a 4200+-range port so it doesn't
+  // collide with the other UI dev servers (4200-4212 are taken).
+  const PORT = MILDRED_MODE === 'live'
+    ? parseInt(process.env.PORT || '4213', 10)
+    : parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json());
+
+  if (MILDRED_MODE === 'live') {
+    // ── LIVE MODE ───────────────────────────────────────────────────
+    // Fallback stubs for endpoints missing on the real mildred-service
+    // (Go, :3140). Registered BEFORE the catch-all proxy so the UI works.
+    // library-paths is not yet implemented on the Go backend.
+    console.log(`[mildred-ui] LIVE mode - proxying to ${LIVE_TARGET} (fallback stubs for library-paths)`);
+
+    app.get('/api/library-paths', (req, res) => sendEnvelope(res, libraryPaths));
+    app.post('/api/library-paths', (req, res) => {
+      const { name, path: dirPath, storage_kind = 'local', watch_enabled = true } = req.body || {};
+      if (!dirPath || typeof dirPath !== 'string' || !dirPath.trim()) {
+        return sendError(res, 400, 'Directory path is required.');
+      }
+      const newPath = {
+        id: nextLibraryPathId++,
+        name: name || dirPath.trim().split('/').pop() || dirPath,
+        path: dirPath.trim(),
+        storage_kind,
+        status: 'active',
+        last_scanned: new Date().toISOString(),
+        file_count: 0,
+        total_bytes: 0,
+        watch_enabled: Boolean(watch_enabled)
+      };
+      libraryPaths.push(newPath);
+      sendEnvelope(res, newPath);
+    });
+    app.delete('/api/library-paths/:id', (req, res) => {
+      const id = Number(req.params.id);
+      libraryPaths = libraryPaths.filter(p => p.id !== id);
+      sendEnvelope(res, { deleted: true });
+    });
+    app.post('/api/library-paths/scan-all', (req, res) => {
+      const now = new Date().toISOString();
+      libraryPaths.forEach(p => { p.last_scanned = now; });
+      sendEnvelope(res, {
+        paths_scanned: libraryPaths.length,
+        files_scanned: 0,
+        new_assets_indexed: 0,
+        status: 'completed',
+        scanned_at: now
+      });
+    });
+    app.post('/api/library-paths/:id/scan', (req, res) => {
+      const id = Number(req.params.id);
+      const libPath = libraryPaths.find(p => p.id === id);
+      if (libPath) libPath.last_scanned = new Date().toISOString();
+      sendEnvelope(res, {
+        files_scanned: libPath?.file_count || 0,
+        new_assets_indexed: 0,
+        status: 'completed'
+      });
+    });
+
+    // Catch-all: proxy everything else to the real mildred backend
+    app.use(createLiveProxy(LIVE_TARGET));
+  } else {
+    // ── MOCK MODE: seeded in-memory REST API (default) ─────────────
 
   // --- HEALTH / PROBES ---
   app.get('/api/health', (req, res) => {
@@ -997,6 +1104,8 @@ async function startServer() {
     });
     res.status(201).json({ data: { id: newId } });
   });
+
+  } // end mock-mode block
 
   // --- VITE MIDDLEWARE FOR SPA ---
   if (process.env.NODE_ENV !== 'production') {
