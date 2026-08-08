@@ -180,7 +180,10 @@ export async function triggerIngestScan(rootPath = '/media/library', dryRun = fa
       dry_run: dryRun
     })
   });
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || 'Failed to scan filesystem');
+  }
   return json.data;
 }
 
@@ -315,19 +318,55 @@ export async function addLibraryPath(name: string, dirPath: string, storage_kind
 }
 
 export async function deleteLibraryPath(id: number): Promise<void> {
-  await fetch(`${API_BASE}/library-paths/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_BASE}/library-paths/${id}`, { method: 'DELETE' });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || 'Failed to remove library path');
+  }
 }
 
-export async function scanLibraryPath(id: number): Promise<any> {
-  const res = await fetch(`${API_BASE}/library-paths/${id}/scan`, { method: 'POST' });
-  const json = await res.json();
-  return json.data;
+async function waitForScan(jobId: string): Promise<any> {
+  const deadline = Date.now() + 30 * 60 * 1000;
+  for (;;) {
+    if (Date.now() >= deadline) throw new Error('Scan is taking longer than 30 minutes; check the catalog for progress.');
+    const res = await fetch(`${API_BASE}/library-paths/scans/${encodeURIComponent(jobId)}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.error) {
+      throw new Error(json.error || 'Failed to read scan status');
+    }
+    const job = json.data;
+    if (job.status === 'failed') {
+      throw new Error(job.error || 'The scan worker failed');
+    }
+    if (job.status === 'completed') {
+      const result = job.result;
+      if (result?.status === 'completed_with_errors' || result?.errors?.length) {
+        const firstError = result.errors?.[0]?.error || 'The scan completed with errors';
+        throw new Error(`${firstError} (${result.new_assets_indexed || 0} new assets indexed)`);
+      }
+      return result;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
 }
 
-export async function scanAllLibraryPaths(): Promise<any> {
-  const res = await fetch(`${API_BASE}/library-paths/scan-all`, { method: 'POST' });
-  const json = await res.json();
-  return json.data;
+async function enqueueScan(path: string): Promise<any> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST' });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || 'Failed to start scan');
+  }
+  const jobId = json.data?.job_id;
+  if (!jobId) throw new Error('Scan did not return a job id');
+  return waitForScan(jobId);
+}
+
+export function scanLibraryPath(id: number): Promise<any> {
+  return enqueueScan(`/library-paths/${id}/scan`);
+}
+
+export function scanAllLibraryPaths(): Promise<any> {
+  return enqueueScan('/library-paths/scan-all');
 }
 
 

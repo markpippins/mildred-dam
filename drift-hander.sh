@@ -8,7 +8,7 @@ APP_NAME="Mildred DAM UI"
 SCHEMA_FILE="src/types.ts"
 FRONTEND_DIR="src/components"
 PORT_FILE="server.ts"
-TARGET_PORT="4213"
+TARGET_PORT="4215"
 
 # Where your custom protocol or OpenCode expects the payload
 AUDITOR_PAYLOAD="gais_auditor_payload.md" 
@@ -72,9 +72,9 @@ git checkout -b "$NEW_DEV_BRANCH"
 # 6. HEADLESS LOCAL CONFIGURATION PREPARATION
 if [ -f "$PORT_FILE" ]; then
     echo "Adapting local port configurations inside $PORT_FILE..."
-    # server.ts uses mode-based ports: mock -> 3000, live -> 4213.
+    # server.ts uses mode-based ports: mock -> 3000, live -> 4215.
     # Rewrite the live-mode default to TARGET_PORT (env PORT still overrides).
-    sed -i "s/process.env.PORT || '4213'/process.env.PORT || '$TARGET_PORT'/g" "$PORT_FILE"
+    sed -i "s/process.env.PORT || '4215'/process.env.PORT || '$TARGET_PORT'/g" "$PORT_FILE"
 fi
 
 # 7. LAUNCH WORKSPACE

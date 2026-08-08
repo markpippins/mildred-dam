@@ -78,7 +78,7 @@ export const IngestModal: React.FC<IngestModalProps> = ({
         if (!dryRun) onSuccess();
       }
     } catch (err) {
-      alert('Ingest scan failed');
+      alert(err instanceof Error ? err.message : 'Ingest scan failed');
     } finally {
       setIsScanning(false);
     }
@@ -102,7 +102,7 @@ export const IngestModal: React.FC<IngestModalProps> = ({
         onClose();
       }
     } catch (err) {
-      alert('Single registration failed');
+      alert(err instanceof Error ? err.message : 'Single registration failed');
     } finally {
       setIsRegistering(false);
     }
@@ -719,7 +719,7 @@ export const LibraryManagementModal: React.FC<LibraryManagementModalProps> = ({
       setTimeout(() => setActionFeedback(null), 4000);
       onSuccess?.();
     } catch (err) {
-      alert('Failed to scan path');
+      alert(err instanceof Error ? err.message : 'Failed to scan path');
     } finally {
       setScanningPathId(null);
     }
@@ -736,7 +736,7 @@ export const LibraryManagementModal: React.FC<LibraryManagementModalProps> = ({
       setTimeout(() => setActionFeedback(null), 4000);
       onSuccess?.();
     } catch (err) {
-      alert('Failed to unmount path');
+      alert(err instanceof Error ? err.message : 'Failed to unmount path');
     }
   };
 

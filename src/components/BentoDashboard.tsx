@@ -17,7 +17,7 @@ import {
   RefreshCw,
   FolderOpen
 } from 'lucide-react';
-import { LibraryStats, DuplicatePair, AssetSummary } from '../types';
+import { LibraryStats, DuplicatePair, AssetSummary, ActivityLogItem } from '../types';
 import { formatBytes, scanAllLibraryPaths } from '../services/api';
 
 interface BentoDashboardProps {
@@ -36,6 +36,7 @@ interface BentoDashboardProps {
   browseSummary?: any;
   onRefreshStats?: () => void;
   onQuickScanSuccess?: () => void;
+  recentActivity?: ActivityLogItem[];
 }
 
 export const BentoDashboard: React.FC<BentoDashboardProps> = ({
@@ -48,13 +49,28 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
   onOpenDuplicatesModal,
   onOpenActivityModal,
   onRefreshStats,
-  onQuickScanSuccess
+  onQuickScanSuccess,
+  recentActivity = []
 }) => {
-  const totalAssets = stats?.total_assets || 16200;
-  const totalBytes = stats?.total_bytes || 795000000000;
-  const byKind = stats?.by_media_kind || { audio: 4, video: 3, image: 3, document: 1, other: 0 };
-  const dupCount = stats?.duplicate_count || 12;
-  const possCount = stats?.possible_duplicate_count || 34;
+  const totalAssets = stats?.total_assets || 0;
+  const totalBytes = stats?.total_bytes || 0;
+  const byKind = stats?.by_media_kind || {};
+  const dupCount = stats?.duplicate_count || 0;
+  const possCount = stats?.possible_duplicate_count || 0;
+
+  // Real distribution heights for the media-kind bars (normalized to the max kind).
+  const kindBarKinds: Array<{ key: string; label: string }> = [
+    { key: 'video', label: 'Video' },
+    { key: 'image', label: 'Image' },
+    { key: 'audio', label: 'Audio' },
+    { key: 'document', label: 'Docs' },
+    { key: 'other', label: 'Other' }
+  ];
+  const maxKindCount = Math.max(1, ...kindBarKinds.map(k => byKind[k.key] || 0));
+  const kindBarHeight = (key: string) => {
+    const count = byKind[key] || 0;
+    return count === 0 ? '4%' : `${Math.max(8, Math.round((count / maxKindCount) * 100))}%`;
+  };
 
   // Calculate potential space recovery from duplicates
   const totalDupBytes = duplicates
@@ -186,12 +202,12 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
         <div>
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-2.5">
-              <Activity className="w-5 h-5 text-indigo-400 animate-pulse" />
-              <h3 className="font-semibold text-white tracking-tight">Live Asset Processing & Ingest Pipeline</h3>
+              <Activity className="w-5 h-5 text-indigo-400" />
+              <h3 className="font-semibold text-white tracking-tight">Recent Activity</h3>
             </div>
             <div className="flex gap-2">
               <span className="px-2.5 py-1 bg-indigo-500/10 text-indigo-400 text-[10px] uppercase tracking-wider font-bold rounded-lg border border-indigo-500/20">
-                4 Active Jobs
+                {recentActivity.length} Recent
               </span>
               <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-[10px] uppercase tracking-wider font-bold rounded-lg border border-emerald-500/20">
                 {totalAssets.toLocaleString()} Total
@@ -200,58 +216,40 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
           </div>
 
           <div className="space-y-3">
-            {/* Live progress row 1 */}
-            <div className="flex items-center gap-4 p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 bg-slate-700/60 rounded-xl flex items-center justify-center font-bold text-slate-300 text-xs border border-slate-600/50">
-                MP4
+            {recentActivity.length === 0 ? (
+              <div className="flex items-center justify-center p-6 text-slate-500 text-sm">
+                No recent activity. The pipeline is idle.
               </div>
-              <div className="flex-1">
-                <div className="flex justify-between text-sm mb-1.5 font-medium">
-                  <span className="text-slate-200 font-mono text-xs">campaign_shoot_day1_034_4k_prores.mov</span>
-                  <span className="text-indigo-400 text-xs font-semibold">SHA-256 Hashing 78%</span>
+            ) : (
+              recentActivity.slice(0, 5).map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-center gap-4 p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition-colors"
+                >
+                  <div className="w-10 h-10 bg-slate-700/60 rounded-xl flex items-center justify-center font-bold text-slate-300 text-xs border border-slate-600/50">
+                    {log.action.slice(0, 3).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline text-sm mb-1 font-medium gap-2">
+                      <span className="text-slate-200 text-xs truncate">
+                        {log.detail || log.action}
+                      </span>
+                      <span className="text-slate-500 text-[10px] whitespace-nowrap">
+                        {new Date(log.occurred_at).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="w-full h-1.5 bg-slate-700/80 rounded-full overflow-hidden">
-                  <div className="w-[78%] h-full bg-indigo-400 rounded-full transition-all duration-500"></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Live progress row 2 */}
-            <div className="flex items-center gap-4 p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 bg-slate-700/60 rounded-xl flex items-center justify-center font-bold text-slate-300 text-xs border border-slate-600/50">
-                FLAC
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between text-sm mb-1.5 font-medium">
-                  <span className="text-slate-200 font-mono text-xs">miles_davis_so_what_master_192k.flac</span>
-                  <span className="text-emerald-400 text-xs font-semibold">Registered • Ready</span>
-                </div>
-                <div className="w-full h-1.5 bg-emerald-500/20 rounded-full overflow-hidden">
-                  <div className="w-full h-full bg-emerald-500 rounded-full"></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Live progress row 3 */}
-            <div className="flex items-center gap-4 p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 bg-slate-700/60 rounded-xl flex items-center justify-center font-bold text-slate-300 text-xs border border-slate-600/50">
-                PDF
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between text-sm mb-1.5 font-medium">
-                  <span className="text-slate-200 font-mono text-xs">Mildred_DAM_Brand_Guidelines_2026.pdf</span>
-                  <span className="text-amber-400 text-xs font-semibold">Scanning for Duplicates (22%)</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-700/80 rounded-full overflow-hidden">
-                  <div className="w-[22%] h-full bg-amber-400 rounded-full"></div>
-                </div>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         </div>
 
         <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
-          <span>Worker Pool: 8 threads • Ingestion speed: ~420 MB/s</span>
+          <span>Pipeline status: {recentActivity.length > 0 ? 'Recent activity available' : 'Idle'}</span>
           <button
             onClick={onOpenIngestModal}
             className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1"
@@ -306,7 +304,7 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
                   <span className="text-slate-300">Orphaned Active Assets</span>
                 </div>
                 <span className="font-mono font-bold text-white bg-slate-800 px-2 py-0.5 rounded text-xs">
-                  {stats?.orphaned_assets || 2}
+                  {stats?.orphaned_assets}
                 </span>
               </div>
             </div>
@@ -331,8 +329,7 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
           </div>
           <div className="text-4xl font-bold mb-3 tracking-tight">{formatBytes(totalBytes)}</div>
           <div className="flex items-center gap-2 text-xs text-indigo-100">
-            <span className="px-1.5 py-0.5 bg-white/20 rounded font-bold">+14.2%</span>
-            <span>Since last library scan</span>
+            <span>Across {totalAssets.toLocaleString()} cataloged assets</span>
           </div>
 
           <div className="mt-5 pt-4 border-t border-indigo-500/50 flex items-center justify-between text-xs text-indigo-100">
@@ -341,7 +338,7 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
               <span className="text-[11px] opacity-80">Cataloged Assets</span>
             </div>
             <div className="text-right">
-              <span className="block font-semibold text-white">{stats?.total_collections || 340}</span>
+              <span className="block font-semibold text-white">{stats?.total_collections}</span>
               <span className="text-[11px] opacity-80">Collections</span>
             </div>
           </div>
@@ -372,54 +369,23 @@ export const BentoDashboard: React.FC<BentoDashboardProps> = ({
 
           {/* Bento stylized distribution bars */}
           <div className="flex items-end justify-between gap-3 h-24 mb-4 pt-2">
-            <div
-              className="w-full bg-indigo-500/40 group-hover:bg-indigo-500/60 transition-all rounded-t-xl relative group/bar"
-              style={{ height: '55%' }}
-            >
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
-                {byKind.video || 3}
-              </span>
-            </div>
-            <div
-              className="w-full bg-indigo-500/60 group-hover:bg-indigo-500/80 transition-all rounded-t-xl relative group/bar"
-              style={{ height: '75%' }}
-            >
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
-                {byKind.image || 3}
-              </span>
-            </div>
-            <div
-              className="w-full bg-indigo-500 group-hover:bg-indigo-400 transition-all rounded-t-xl relative group/bar"
-              style={{ height: '100%' }}
-            >
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
-                {byKind.audio || 4}
-              </span>
-            </div>
-            <div
-              className="w-full bg-indigo-500/80 group-hover:bg-indigo-500 transition-all rounded-t-xl relative group/bar"
-              style={{ height: '40%' }}
-            >
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
-                {byKind.document || 1}
-              </span>
-            </div>
-            <div
-              className="w-full bg-indigo-500/30 group-hover:bg-indigo-500/50 transition-all rounded-t-xl relative group/bar"
-              style={{ height: '20%' }}
-            >
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
-                {byKind.other || 0}
-              </span>
-            </div>
+            {kindBarKinds.map((k, idx) => (
+              <div
+                key={k.key}
+                className="w-full bg-indigo-500/40 group-hover:bg-indigo-500/60 transition-all rounded-t-xl relative group/bar"
+                style={{ height: kindBarHeight(k.key), opacity: 1 - idx * 0.12 }}
+              >
+                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-mono font-bold text-slate-300 opacity-0 group-hover/bar:opacity-100 transition-opacity">
+                  {byKind[k.key] || 0}
+                </span>
+              </div>
+            ))}
           </div>
 
           <div className="flex justify-between text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
-            <span>Video</span>
-            <span>Image</span>
-            <span>Audio</span>
-            <span>Docs</span>
-            <span>Other</span>
+            {kindBarKinds.map(k => (
+              <span key={k.key}>{k.label}</span>
+            ))}
           </div>
         </div>
       </div>

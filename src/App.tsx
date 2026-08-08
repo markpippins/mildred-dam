@@ -186,6 +186,16 @@ export default function App() {
     }
   }, []);
 
+  // Refresh Activity Logs
+  const refreshActivity = useCallback(async () => {
+    try {
+      const logs = await fetchActivityLogs(10);
+      setActivityLogs(logs);
+    } catch (err) {
+      console.error('Failed loading activity logs:', err);
+    }
+  }, []);
+
   // Refresh Collections & Tags
   const refreshCollections = useCallback(async () => {
     setIsLoadingCollections(true);
@@ -206,6 +216,7 @@ export default function App() {
   // Trigger loading when tab changes
   useEffect(() => {
     refreshStats();
+    refreshActivity();
     if (activeTab === 'dashboard' || activeTab === 'catalog' || activeTab === 'discovery') {
       refreshAssets();
     }
@@ -215,7 +226,7 @@ export default function App() {
     if (activeTab === 'collections') {
       refreshCollections();
     }
-  }, [activeTab, refreshStats, refreshAssets, refreshDuplicates, refreshCollections]);
+  }, [activeTab, refreshStats, refreshAssets, refreshDuplicates, refreshCollections, refreshActivity]);
 
   // Also refresh assets when search/filter inputs change
   useEffect(() => {
@@ -374,9 +385,16 @@ export default function App() {
               browseSummary={browseSummary}
               duplicates={duplicates}
               recentAssets={assets.slice(0, 7)}
+              recentActivity={activityLogs}
               onNavigateToCatalog={() => setActiveTab('discovery')}
               onNavigateToDuplicates={() => setActiveTab('duplicates')}
               onOpenIngestModal={() => setIsIngestModalOpen(true)}
+              onRefreshStats={refreshStats}
+              onQuickScanSuccess={() => {
+                showToast('Library scan completed & catalog refreshed', 'success');
+                refreshAssets();
+                refreshActivity();
+              }}
               onOpenPlayModal={handleOpenPlayModal}
               onOpenDetailModal={handleOpenDetailModal}
             />
