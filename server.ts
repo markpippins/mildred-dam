@@ -6,7 +6,21 @@ import http from 'http';
 
 dotenv.config();
 
-// --- SEEDED IN-MEMORY DATABASE FOR MILDRED DAM REST API ---
+// Runtime mode from .env (VITE_MILDRED_MODE):
+//   mock = serve seeded in-memory data on port 3000 (default, no .env needed)
+//   live = proxy /api to the real mildred-service backend (:3140) on :4215
+//
+// Computed early so the mock-seed gate below can short-circuit in live mode.
+const MILDRED_MODE = (process.env.VITE_MILDRED_MODE || 'mock').toLowerCase();
+
+// --- SEEDED IN-MEMORY DATABASE FOR MILDRED DAM REST API (MOCK MODE ONLY) ---
+//
+// All arrays/counters below are gated on mock mode: in live mode they stay
+// empty so no mock data can ever leak into the API surface (the Go backend
+// owns the real data, including /api/library-paths*). Declared at module
+// scope (not inside startServer's mock branch) so TypeScript can still see
+// them at their handler reference sites, then populated only when mock is
+// active.
 
 let nextAssetId = 100;
 let nextCollectionId = 20;
@@ -14,7 +28,17 @@ let nextTagId = 30;
 let nextDuplicateId = 10;
 let nextActivityId = 2000;
 
-const LOOKUPS = {
+let LOOKUPS: any = {};
+let tags: any[] = [];
+let collections: any[] = [];
+let assets: any[] = [];
+let duplicatePairs: any[] = [];
+let activityLogs: any[] = [];
+let nextLibraryPathId = 4;
+let libraryPaths: any[] = [];
+
+if (MILDRED_MODE === 'mock') {
+LOOKUPS = {
   mediaKinds: [
     { id: 1, code: 'audio', description: 'Audio files' },
     { id: 2, code: 'video', description: 'Video files' },
@@ -60,7 +84,7 @@ const LOOKUPS = {
   ]
 };
 
-const tags = [
+tags = [
   { id: 1, name: 'mood', aliases: [], children: [
     { id: 7, name: 'upbeat', parent_tag_id: 1, aliases: ['energetic', 'lively'], children: [] },
     { id: 8, name: 'melancholic', parent_tag_id: 1, aliases: ['calm', 'ambient'], children: [] }
@@ -74,7 +98,7 @@ const tags = [
   { id: 5, name: 'needs-review', aliases: [], children: [] }
 ];
 
-const collections: any[] = [
+collections = [
   {
     id: 1,
     parent_collection_id: 0,
@@ -127,7 +151,7 @@ const collections: any[] = [
 ];
 
 // Rich set of realistic seeded assets
-let assets: any[] = [
+assets = [
   {
     id: 42,
     content_hash: 'd41d8cd98f00b204e9800998ecf8427e01',
@@ -328,7 +352,7 @@ let assets: any[] = [
   }
 ];
 
-let duplicatePairs: any[] = [
+duplicatePairs = [
   {
     id: 1,
     asset_id: 44,
@@ -387,7 +411,7 @@ let duplicatePairs: any[] = [
   }
 ];
 
-let activityLogs: any[] = [
+activityLogs = [
   { id: 101, occurred_at: '2026-07-31T18:45:00Z', action: 'ingested', asset_id: 51, asset_path: 'archive/prores_masters/brand_anthem_2026_prores422.mov', collection_id: 4, collection_name: 'Q3 Product Marketing Campaign', user_id: 1, username: 'mpippins', detail: 'Ingested DCI 4K ProRes Master via automated scan' },
   { id: 102, occurred_at: '2026-07-31T18:10:00Z', action: 'duplicate_resolved', asset_id: 44, asset_path: 'campaigns/q3_launch/product_demo_v2_4k_final.mp4', collection_id: null, collection_name: null, user_id: 1, username: 'mpippins', detail: 'Confirmed exact duplicate match with backup copy (Score 1.00)' },
   { id: 103, occurred_at: '2026-07-31T17:30:00Z', action: 'tagged', asset_id: 42, asset_path: 'albums/jazz/miles_davis/so_what_master_192k.flac', collection_id: 1, collection_name: 'Jazz Classics Archive', user_id: 1, username: 'mpippins', detail: 'Added tags: favorites, master-copy' },
@@ -395,8 +419,8 @@ let activityLogs: any[] = [
   { id: 105, occurred_at: '2026-07-31T15:00:00Z', action: 'ingested', asset_id: 49, asset_path: 'albums/jazz/miles_davis/blue_in_green_master.flac', collection_id: 1, collection_name: 'Jazz Classics Archive', user_id: 1, username: 'mpippins', detail: 'Ingested lossless FLAC track' }
 ];
 
-let nextLibraryPathId = 4;
-let libraryPaths: any[] = [
+nextLibraryPathId = 4;
+libraryPaths = [
   {
     id: 1,
     name: 'Primary Media Library',
@@ -432,6 +456,8 @@ let libraryPaths: any[] = [
   }
 ];
 
+} // end mock-mode seed gate
+
 // Helper to wrap responses in Mildred DAM uniform envelope
 function sendEnvelope(res: express.Response, data: any, meta?: any) {
   res.status(200).json({ data, meta });
@@ -441,10 +467,10 @@ function sendError(res: express.Response, status: number, error: string) {
   res.status(status).json({ error });
 }
 
-// Runtime mode from .env (VITE_MILDRED_MODE):
-//   mock = serve seeded in-memory data on port 3000 (default, no .env needed)
-//   live = proxy /api to the real mildred-service backend (:3140)
-const MILDRED_MODE = (process.env.VITE_MILDRED_MODE || 'mock').toLowerCase();
+// LIVE_TARGET is the real mildred-service base URL, used by the live-mode
+// catch-all proxy. (MILDRED_MODE is declared earlier, near the mock-seed
+// gate, so the gate can short-circuit in live mode without evaluating any
+// of the populated arrays.)
 const LIVE_TARGET = process.env.VITE_MILDRED_TARGET || 'http://localhost:3140';
 
 // Live-mode HTTP proxy: forwards non-static requests to the real backend.
@@ -474,7 +500,9 @@ function createLiveProxy(targetUrl: string) {
       console.error(`[mildred-ui -> live] proxy error: ${err.message}`);
       if (!res.headersSent) res.status(502).json({ error: 'Mildred backend unreachable', detail: err.message });
     });
-    proxyReq.setTimeout(30000, () => { proxyReq.destroy(); });
+    // Large live-library scans are synchronous on the Go service. Keep the
+    // proxy open long enough for the backend to finish and return its result.
+    proxyReq.setTimeout(10 * 60 * 1000, () => { proxyReq.destroy(); });
     if (body) proxyReq.write(body);
     proxyReq.end();
   };
@@ -482,70 +510,24 @@ function createLiveProxy(targetUrl: string) {
 
 async function startServer() {
   const app = express();
-  // Port by mode: mock → 3000 (Google AI Studio default), live → 4213
+  // Port by mode: mock → 3000 (Google AI Studio default), live → 4215
   // (override with PORT env var). Live keeps a 4200+-range port so it doesn't
-  // collide with the other UI dev servers (4200-4212 are taken).
+  // collide with the other UI dev servers (4200-4214 are taken; 4213 belongs
+  // to nexus/angular/semantics-ui).
   const PORT = MILDRED_MODE === 'live'
-    ? parseInt(process.env.PORT || '4213', 10)
+    ? parseInt(process.env.PORT || '4215', 10)
     : parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json());
 
   if (MILDRED_MODE === 'live') {
     // ── LIVE MODE ───────────────────────────────────────────────────
-    // Fallback stubs for endpoints missing on the real mildred-service
-    // (Go, :3140). Registered BEFORE the catch-all proxy so the UI works.
-    // library-paths is not yet implemented on the Go backend.
-    console.log(`[mildred-ui] LIVE mode - proxying to ${LIVE_TARGET} (fallback stubs for library-paths)`);
+    // All /api/* routes are proxied straight to the real mildred-service
+    // (Go, :3140). The Go backend now serves /api/library-paths* itself
+    // (backed by media.storage_location), so there are no UI-side stubs.
+    console.log(`[mildred-ui] LIVE mode - proxying to ${LIVE_TARGET}`);
 
-    app.get('/api/library-paths', (req, res) => sendEnvelope(res, libraryPaths));
-    app.post('/api/library-paths', (req, res) => {
-      const { name, path: dirPath, storage_kind = 'local', watch_enabled = true } = req.body || {};
-      if (!dirPath || typeof dirPath !== 'string' || !dirPath.trim()) {
-        return sendError(res, 400, 'Directory path is required.');
-      }
-      const newPath = {
-        id: nextLibraryPathId++,
-        name: name || dirPath.trim().split('/').pop() || dirPath,
-        path: dirPath.trim(),
-        storage_kind,
-        status: 'active',
-        last_scanned: new Date().toISOString(),
-        file_count: 0,
-        total_bytes: 0,
-        watch_enabled: Boolean(watch_enabled)
-      };
-      libraryPaths.push(newPath);
-      sendEnvelope(res, newPath);
-    });
-    app.delete('/api/library-paths/:id', (req, res) => {
-      const id = Number(req.params.id);
-      libraryPaths = libraryPaths.filter(p => p.id !== id);
-      sendEnvelope(res, { deleted: true });
-    });
-    app.post('/api/library-paths/scan-all', (req, res) => {
-      const now = new Date().toISOString();
-      libraryPaths.forEach(p => { p.last_scanned = now; });
-      sendEnvelope(res, {
-        paths_scanned: libraryPaths.length,
-        files_scanned: 0,
-        new_assets_indexed: 0,
-        status: 'completed',
-        scanned_at: now
-      });
-    });
-    app.post('/api/library-paths/:id/scan', (req, res) => {
-      const id = Number(req.params.id);
-      const libPath = libraryPaths.find(p => p.id === id);
-      if (libPath) libPath.last_scanned = new Date().toISOString();
-      sendEnvelope(res, {
-        files_scanned: libPath?.file_count || 0,
-        new_assets_indexed: 0,
-        status: 'completed'
-      });
-    });
-
-    // Catch-all: proxy everything else to the real mildred backend
+    // Catch-all: proxy everything to the real mildred backend
     app.use(createLiveProxy(LIVE_TARGET));
   } else {
     // ── MOCK MODE: seeded in-memory REST API (default) ─────────────
@@ -1110,7 +1092,16 @@ async function startServer() {
   // --- VITE MIDDLEWARE FOR SPA ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        // Vite rejects unknown Host headers even behind this middleware server,
+        // so the LAN names come from the environment (start-nexus-uis.sh writes
+        // a systemd drop-in) instead of being baked into code.
+        allowedHosts: (process.env.NEXUS_UI_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean),
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);

@@ -128,7 +128,7 @@ export const DiscoveryTable: React.FC<DiscoveryTableProps> = ({
       setPathActionMessage(`Mounted new library path "${added.path}" successfully`);
       setTimeout(() => setPathActionMessage(null), 4000);
     } catch (err) {
-      alert('Failed to mount library path');
+      alert(err instanceof Error ? err.message : 'Failed to mount library path');
     }
   };
 
@@ -141,7 +141,7 @@ export const DiscoveryTable: React.FC<DiscoveryTableProps> = ({
       setPathActionMessage(`Scan completed for "${name}": directory synchronized`);
       setTimeout(() => setPathActionMessage(null), 4000);
     } catch (err) {
-      alert('Failed to scan path');
+      alert(err instanceof Error ? err.message : 'Failed to scan path');
     } finally {
       setScanningPathId(null);
     }
@@ -157,7 +157,7 @@ export const DiscoveryTable: React.FC<DiscoveryTableProps> = ({
       setPathActionMessage(`Unmounted library path "${name}"`);
       setTimeout(() => setPathActionMessage(null), 4000);
     } catch (err) {
-      alert('Failed to delete library path');
+      alert(err instanceof Error ? err.message : 'Failed to delete library path');
     }
   };
 
