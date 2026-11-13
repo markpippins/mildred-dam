@@ -1092,7 +1092,16 @@ async function startServer() {
   // --- VITE MIDDLEWARE FOR SPA ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        // Vite rejects unknown Host headers even behind this middleware server,
+        // so the LAN names come from the environment (start-nexus-uis.sh writes
+        // a systemd drop-in) instead of being baked into code.
+        allowedHosts: (process.env.NEXUS_UI_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim())
+          .filter(Boolean),
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);
